@@ -150,7 +150,6 @@ app/src/main/java/com/airgesture/sweep/   应用代码（无障碍服务 / 判�
 app/src/main/assets/hand_landmarker.task  MediaPipe 手部模型
 probe/                                    判定逻辑的 Python 参考实现 + 跨语言向量生成器
 tools/                                    构建、测量、图标生成脚本
-docs/                                     工程记录（功耗与内存实测、踩坑、设计取舍）
 ```
 
 ## 🔒 权限与隐私

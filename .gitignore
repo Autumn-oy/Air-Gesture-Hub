@@ -23,9 +23,10 @@ local.properties
 #      （二进制留在每个提交里会让 clone 越来越慢）
 release/
 
-# ---- 测量原始数据与改动前备份（体积大，属开发侧资料）----
-docs/power-runs/
-docs/source-backups/
+# ---- 开发侧工程记录：不随仓库发布（文件保留在本地磁盘）----
+#      docs/ 已从 git 历史里彻底移除（重写历史 + force push），
+#      这里再留一道防线，防止以后手滑把它 add 回去。
+docs/
 
 # ---- IDE / 操作系统 ----
 .idea/

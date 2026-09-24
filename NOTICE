@@ -22,7 +22,7 @@ Copyright 2026 Autumn-oy
   Copyright Google LLC
   说明：它由 MediaPipe Tasks 传递引入；APK 里的 INTERNET 与
   ACCESS_NETWORK_STATE 权限也来自它。本应用自身不把它用于任何业务上报，
-  并且已评估过移除它的风险后决定保留（详见 docs/power-conclusions.md）。
+  并且已评估过移除它的风险后决定保留（评估过程属开发侧记录，不随本仓库发布）。
 
 - MediaPipe 的其它传递依赖（Guava / Flogger / protobuf-javalite 等）
 
