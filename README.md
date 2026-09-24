@@ -140,9 +140,11 @@ android\tools\build.ps1 -RunTests -Release
 android\tools\build.ps1 -Release -Debuggable
 ```
 
-- 编译需要 `android\keystore.properties` 与 `android\keystore\*.jks`（**仓库里没有**，见"签名"一节）
+
+- 编译需要 `android\keystore.properties` 与 `android\keystore\*.jks`
 - 脚本会先把源码镜像到 ASCII 路径再编译 —— AGP 与单测 worker 在非 ASCII 工程路径下会出问题
 - 护栏：`python -m unittest probe.test_detector_ref`（**29** 个）+ 上面 `-RunTests`（Kotlin **75** 个）
+
 
 ## 📁 仓库结构
 
