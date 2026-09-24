@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  权限说明（与 Google 官方 Project Gameface 安卓版的做法一致）：
+  因为相机、MediaPipe 推理、手势注入**全部放在无障碍服务里**，
+  所以只需要 CAMERA 一个权限 —— 不需要前台服务、不需要 SYSTEM_ALERT_WINDOW（悬浮窗）。
+  实测依据：project-gameface/Android/app/src/main/AndroidManifest.xml 也只声明了 CAMERA。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <uses-feature
+        android:name="android.hardware.camera.front"
+        android:required="true" />
+
+    <!--
+      包可见性（Android 11+ 必需）。
+      「相机作用域 → 白名单」要扫描"已安装且有启动入口"的应用让用户勾选，
+      靠的是 PackageManager.queryIntentActivities(CATEGORY_LAUNCHER)。
+      从 API 30 起，没在 <queries> 里声明的查询**只会返回自己 + 少数系统应用**，
+      结果就是白名单列表几乎是空的、功能看起来"扫不到应用"。
+      这里按意图查询授权，不需要 QUERY_ALL_PACKAGES 那种敏感权限。
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- 设备白名单的二级界面：只在应用内部启动，不对外导出。 -->
+        <activity
+            android:name=".WhitelistActivity"
+            android:exported="false"
+            android:label="@string/app_name" />
+
+        <!--
+          无障碍服务：本项目的心脏。
+          canPerformGestures  -> 允许 dispatchGesture 合成滑动
+          canRetrieveWindowContent -> 允许拿到节点树做 ACTION_SCROLL_FORWARD/BACKWARD
+        -->
+        <service
+            android:name=".SweepAccessibilityService"
+            android:exported="false"
+            android:label="@string/service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+    </application>
+
+</manifest>

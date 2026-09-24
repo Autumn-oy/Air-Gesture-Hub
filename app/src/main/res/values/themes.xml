@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 用平台自带主题，避免引入 appcompat 依赖（少一个依赖 = 少一类构建问题） -->
+    <style name="AppTheme" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#FFF7F8FA</item>
+    </style>
+</resources>

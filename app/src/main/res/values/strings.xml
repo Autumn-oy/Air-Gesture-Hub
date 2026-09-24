@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">云枢</string>
+    <string name="service_label">云枢</string>
+    <string name="service_description">云枢：手贴近接近光传感器唤醒后，用前置摄像头识别四指扫动，把它变成屏幕上的滑动。开启后可以隔空上下左右翻页／滚动。相机画面只在本机实时处理，不保存、不上传。</string>
+</resources>

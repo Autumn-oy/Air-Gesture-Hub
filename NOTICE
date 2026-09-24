@@ -1,0 +1,29 @@
+云枢 (Air Gesture Hub)
+Copyright 2026 Autumn-oy
+
+本产品以 Apache License 2.0 授权（全文见 LICENSE）。
+本产品包含以下第三方组件，均为 Apache License 2.0：
+
+- MediaPipe Tasks
+  com.google.mediapipe:tasks-vision / tasks-core
+  Copyright 2023 The MediaPipe Authors
+  https://github.com/google-ai-edge/mediapipe
+  包含随 APK 分发的手部关键点模型 assets/hand_landmarker.task
+
+- AndroidX / Jetpack（androidx.*）
+  Copyright The Android Open Source Project
+  https://developer.android.com/jetpack
+
+- CameraX（androidx.camera.*）
+  Copyright The Android Open Source Project
+
+- Google Datatransport
+  com.google.android.datatransport: transport-api / transport-runtime / transport-backend-cct
+  Copyright Google LLC
+  说明：它由 MediaPipe Tasks 传递引入；APK 里的 INTERNET 与
+  ACCESS_NETWORK_STATE 权限也来自它。本应用自身不把它用于任何业务上报，
+  并且已评估过移除它的风险后决定保留（详见 docs/power-conclusions.md）。
+
+- MediaPipe 的其它传递依赖（Guava / Flogger / protobuf-javalite 等）
+
+以上组件随构建产物分发的版权与许可声明保留在 APK 的 META-INF/ 目录下，未作删改。

@@ -1,34 +1,38 @@
-# Gradle files
-.gradle/
-build/
+# ============================================================
+#  云枢（Air Gesture Hub）—— 不要把这些提交进仓库
+# ============================================================
 
-# Local configuration file (sdk path, etc)
-local.properties
-
-# Log/OS Files
-*.log
-
-# Android Studio generated files and folders
-captures/
-.externalNativeBuild/
-.cxx/
-*.aab
-*.apk
-output-metadata.json
-
-# IntelliJ
-*.iml
-.idea/
-misc.xml
-deploymentTargetDropDown.xml
-render.experimental.xml
-
-# Keystore files
+# ---- ★ 签名与口令：一旦提交就等于把"应用身份"送人 ----
+#      拿到它们的人可以签出既能通过 SignatureGuard 自检、
+#      又能覆盖安装你 App 的包 —— 签名校验那层防护会直接归零。
+keystore/
+keystore.properties
 *.jks
 *.keystore
 
-# Google Services (e.g. APIs or Firebase)
-google-services.json
+# ---- 构建产物（本机可重新生成）----
+build/
+app/build/
+.gradle/
+.kotlin/
+local.properties
+*.apk
+*.aab
 
-# Android Profiling
-*.hprof
+# ---- 归档的历史 APK：走 GitHub Releases 发布，不进 git 历史 ----
+#      （二进制留在每个提交里会让 clone 越来越慢）
+release/
+
+# ---- 测量原始数据与改动前备份（体积大，属开发侧资料）----
+docs/power-runs/
+docs/source-backups/
+
+# ---- IDE / 操作系统 ----
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# ---- Python 缓存（probe/ 里只有脚本）----
+__pycache__/
+*.pyc
