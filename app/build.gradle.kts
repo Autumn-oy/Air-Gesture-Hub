@@ -29,8 +29,17 @@ android {
         // v1.0.2：接近光窗口 20 秒 → 15 秒（2026-09-24 用户要求）。
         // v2.0.0：正式发布版 —— 中文名「云枢」/ Air Gesture Hub，界面按用户定稿重排。
         // v2.0.1：界面上显示版本号（从 PackageManager 读，不写死）。
-        versionCode = 45
-        versionName = "2.0.1"
+        // v2.2.0：接近光窗口 15 秒 → 8 秒（2026-09-25 用户要求，
+        //         依据 7h20m 日常工况实测：相机 21m15s / 66 次会话 / 占空比 4.84%）。
+        // v2.3.0：横屏支持 —— 方向映射按屏幕旋转推导（ScreenOrientation）、
+        //         同步 CameraX targetRotation、横屏只保留上下（左右扫不注入）。
+        //         2026-09-26 真机验收通过（竖屏 + 两个横屏方向全对），见
+        //         docs/verify-v2.3.0/report.md。
+        // v2.3.1：冷静期 1200ms → 1100ms（用户要求）；其余不变。
+        // v2.3.2：冷静期 1100ms → 1000ms（用户要求）；参数迁移改为**按值对齐**
+        //         （见 Prefs.migrateOnce：以后改定稿值不需要再加 migrated_vN 键）。
+        versionCode = 49
+        versionName = "2.3.2"
 
         // 目标机型是骁龙 888 ~ 8 Gen 3，全是 arm64。
         // 不限制的话 MediaPipe 会把 4 个 ABI 的原生库都打进去，APK 从 ~20MB 涨到 66MB。

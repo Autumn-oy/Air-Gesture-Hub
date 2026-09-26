@@ -11,8 +11,8 @@ import android.content.Context
  * | 参数 | 内置值 | 说明 |
  * |---|---|---|
  * | 触发阈值 | 0.14 | 画面高度比例；实测扫动幅度约 0.45，0.14 抗误触发更好 |
- * | 方向角偏移 | +90° | 用户当前修正后的值（画面整体转了 90°） |
- * | 冷静期 | 1300ms | **从触发那一瞬间**起算（不是等滑动播完） |
+ * | 方向角偏移 | +90° | **自然竖屏（ROTATION_0）下的锚点**；横屏偏移由它 + 屏幕旋转推出（v2.3.0，见 ScreenOrientation） |
+ * | 冷静期 | 1000ms | **从触发那一瞬间**起算（不是等滑动播完）；v2.3.2 由 1100 改 |
  * | 要求伸出的手指数 | 3 | 单指/双指仍然被挡住 |
  * | 四指并拢上限 | 2.0 | 2.0 等于**不再用并拢度筛**（张开手掌约 1.4~1.8），留字段备用 |
  * | 合成滑动时长 | 200ms | |
@@ -37,7 +37,6 @@ object Prefs {
     private const val K_SWIPE_FRAC_V = "swipe_frac_v"
     private const val K_SWIPE_FRAC_H = "swipe_frac_h"
     private const val K_MIN_EXTENDED = "min_extended"
-    private const val K_MIGRATED_V4 = "migrated_v4"
     private const val K_DEBUG_OVERLAY = "debug_overlay"
     private const val K_ACTIVE = "active"
     private const val K_CAMERA_SCOPE = "camera_scope"
@@ -55,17 +54,33 @@ object Prefs {
     /** 触发位移阈值（画面高度比例）。 */
     const val DEFAULT_ENTER_THR = 0.14f
 
-    /** 方向角整体偏移（度）—— 用户当前修正后的值。 */
+    /**
+     * 方向角偏移的**自然竖屏锚点**（度）。
+     *
+     * ★ v2.3.0 语义澄清：这个值只在**屏幕处于自然竖屏（ROTATION_0）**时直接生效；
+     *   横屏/倒竖屏时的偏移 = 本值 + 屏幕旋转度数（见 [ScreenOrientation.angleOffsetDeg]）。
+     *   推导与依据（为什么必须是 90°、为什么横屏不能写死一个常量）写在 ScreenOrientation 顶部。
+     *
+     * 它是"该机型在自然方向下的几何常数"（前置 sensor 270° ⇒ 270+180=90），
+     * 不是"支架角度"之类的现场标定值 —— 这也是竖屏行为在 v2.3.0 前后**逐位不变**的原因。
+     */
     const val DEFAULT_ANGLE_OFFSET = 90f
 
     /**
      * ★冷静期（毫秒）。计时起点是**判定器触发的那一刻**（位移越过 enterThr 的那一帧），
      * 不是"合成滑动播放完"之后 —— 见 SweepDetector：触发即 `state = COOLDOWN`。
-     * 这 1200ms 盖住"后半截扫动 + 顶点停顿 + 收手归位"整段，它们一次都不会被累积。
+     * 这 1000ms 盖住"后半截扫动 + 顶点停顿 + 收手归位"整段，它们一次都不会被累积。
      *
-     * v0.17.9 由 1300ms 改为 1200ms（用户实测后定的）。
+     * 沿革：1300ms →（v0.17.9）1200ms →（v2.3.1）1100ms →（**v2.3.2，用户要求**）**1000ms**。
+     *
+     * ⚠️ 缩短冷静期 = 收窄"归位动作被吸收"的窗口。已有的实测边界（README 7.2 那张表）是
+     * 在**幅度 ≤0.30 屏高**时"任何归位速度都安全"（而合成滑动幅度定稿就是 0.30），
+     * 所以 1000ms 仍在安全侧；但幅度明显大于 0.35 的大开大合动作，余量已经不大
+     * （实测扫描里 0.50 屏高那一档在 ~1.0s 附近就开始出现误触发，再往下就不要去了）。
+     *
+     * 跨语言同步：`probe/detector_ref.py` 默认值、31 个向量（`SweepVectors.kt`）都已同步（本值 1000）。
      */
-    const val DEFAULT_COOLDOWN_MS = 1200f
+    const val DEFAULT_COOLDOWN_MS = 1000f
 
     /** 锁定时四指里至少要伸出几根。3 = 单指/双指挡住，三根就算过（用户定稿）。 */
     const val DEFAULT_MIN_EXTENDED = 3
@@ -125,35 +140,57 @@ object Prefs {
             cooldownMs = p.getFloat(K_COOLDOWN_MS, DEFAULT_COOLDOWN_MS).toDouble(),
             lostMs = p.getFloat(K_LOST_MS, DEFAULT_LOST_MS).toDouble(),
             maxSweepMs = p.getFloat(K_MAX_SWEEP_MS, DEFAULT_MAX_SWEEP_MS).toDouble(),
+            // ★ v2.3.0：这里给的是**自然竖屏锚点**，服务在每帧喂判定器之前会用
+            //   `ScreenOrientation.angleOffsetDeg(屏幕旋转, 锚点)` 覆盖它（横屏要 ±90°）。
+            //   留着这个初值是有意的兜底：即使覆盖那一步没跑（比如刚启动的前几帧），
+            //   判定器用的也还是竖屏正确值。
             angleOffsetDeg = p.getFloat(K_ANGLE_OFFSET, DEFAULT_ANGLE_OFFSET).toDouble(),
             minExtendedFingers = p.getInt(K_MIN_EXTENDED, DEFAULT_MIN_EXTENDED),
         )
     }
 
     /**
-     * 一次性迁移（v0.16.0）：把所有定稿参数**强制**写成内置值。
+     * 参数对齐（服务启动 / App 启动时各调一次）。
      *
-     * 为什么必须做：SharedPreferences 里已有的值会**盖掉**代码里的新默认值，
-     * 而这些键在旧版本里被滑块/标定写过（比如左右幅度被"桌面翻页"顶到 0.60、
-     * 冷静期是 1500、方向角是标定值）。
+     * ==================== v2.3.2 起改成"按值对齐"（幂等），不再用一次性布尔键 ====================
+     * 理由：本项目反复踩**同一个**坑 —— `SharedPreferences` 里存着的旧值会**盖掉**代码里的新默认值。
+     * 历史上每改一次定稿值就得再加一个 `migrated_vN` 键（v4 一次、v5 一次……），
+     * 而漏加就会变成"代码改了、手机上没生效"这种最难查的问题（改冷静期时真踩过：
+     * 手机上存着 1200，光改 `DEFAULT_COOLDOWN_MS` 一点用都没有）。
      *
-     * ⚠️ 唯一**不覆盖**的是方向角：用户报"当前修正后的方向角"是 +90°，已作为代码默认值；
-     *    但他手机上已经生效的那个值（可能是 -90 或别的）保持原样 —— 万一口述的符号与实际
-     *    相反，强制写入会把他本来好用的方向搞反 180°。**重装后**才会用到代码里的 +90°。
+     * 现在直接比"存着的值 != 代码常量就写回"：
+     *   · 改多少次定稿值都自动生效，不需要再加键；
+     *   · 这些参数**本来就不给用户改**（界面里没有滑块，见类注释"参数定稿并内置"），
+     *     所以"代码常量是唯一真源"是符合设计的语义，而不是越权。
+     *
+     * ⚠️ 刻意**不碰**三个"设备相关"项：`mirror_x` / `invert_vertical` / `angle_offset_deg`。
+     *    它们取决于具体机型的相机几何（前置镜像、传感器朝向），
+     *    重装后回代码默认，但**绝不能**在这里被强写 —— 那会把手调好的方向搞反 180°。
      */
     fun migrateOnce(ctx: Context) {
         val p = sp(ctx)
-        if (p.getBoolean(K_MIGRATED_V4, false)) return
-        p.edit()
-            .putFloat(K_ENTER_THR, DEFAULT_ENTER_THR)
-            .putFloat(K_COOLDOWN_MS, DEFAULT_COOLDOWN_MS)
-            .putFloat(K_TOGETHER_MAX, DEFAULT_TOGETHER_MAX)
-            .putFloat(K_SWIPE_MS, DEFAULT_SWIPE_MS)
-            .putFloat(K_SWIPE_FRAC_V, DEFAULT_SWIPE_FRAC_V)
-            .putFloat(K_SWIPE_FRAC_H, DEFAULT_SWIPE_FRAC_H)
-            .putInt(K_MIN_EXTENDED, DEFAULT_MIN_EXTENDED)
-            .putBoolean(K_MIGRATED_V4, true)
-            .apply()
+        val e = p.edit()
+        var dirty = false
+        fun alignF(key: String, v: Float) {
+            if (p.getFloat(key, Float.NaN) != v) {
+                e.putFloat(key, v)
+                dirty = true
+            }
+        }
+        fun alignI(key: String, v: Int) {
+            if (p.getInt(key, Int.MIN_VALUE) != v) {
+                e.putInt(key, v)
+                dirty = true
+            }
+        }
+        alignF(K_ENTER_THR, DEFAULT_ENTER_THR)
+        alignF(K_COOLDOWN_MS, DEFAULT_COOLDOWN_MS)
+        alignF(K_TOGETHER_MAX, DEFAULT_TOGETHER_MAX)
+        alignF(K_SWIPE_MS, DEFAULT_SWIPE_MS)
+        alignF(K_SWIPE_FRAC_V, DEFAULT_SWIPE_FRAC_V)
+        alignF(K_SWIPE_FRAC_H, DEFAULT_SWIPE_FRAC_H)
+        alignI(K_MIN_EXTENDED, DEFAULT_MIN_EXTENDED)
+        if (dirty) e.apply()
     }
 
     // ---------------------------------------------------------------- 存取
@@ -162,6 +199,10 @@ object Prefs {
 
     fun setEnterThr(ctx: Context, v: Float) = sp(ctx).edit().putFloat(K_ENTER_THR, v).apply()
 
+    /**
+     * 方向角锚点（自然竖屏下生效的值）。**注意**：横屏时的实际偏移不是它，
+     * 而是 `ScreenOrientation.angleOffsetDeg(屏幕旋转, 它)` —— 服务每帧算一次。
+     */
     fun angleOffset(ctx: Context): Float = sp(ctx).getFloat(K_ANGLE_OFFSET, DEFAULT_ANGLE_OFFSET)
 
     fun setAngleOffset(ctx: Context, v: Float) = sp(ctx).edit().putFloat(K_ANGLE_OFFSET, v).apply()
@@ -260,7 +301,7 @@ object Prefs {
      *   而本项目两台测试机（荣耀 AMG-AN00 / 华为 ELS-AN00）都在这上面踩过坑。
      *
      *   "一离开白名单就切断相机"同时解决了用户在桌面看到的降帧：
-     *   相机不再需要在桌面上空转到接近光窗口过期（那一段最长 15 秒）。
+     *   相机不再需要在桌面上空转到接近光窗口过期（那一段最长 8 秒）。
      *
      * 空名单时 [CameraScope.shouldRunCamera] 会退化为"按全局处理"，
      * 所以新装的用户不会因为还没勾选就完全用不了。
@@ -328,18 +369,28 @@ object Prefs {
         sp(ctx).edit().putBoolean(K_PROXIMITY_TRIGGER, v).apply()
 
     /**
-     * 接近光触发后的窗口长度（毫秒）。也是"多久没检测到手就解绑"的时长。
+     * 接近光触发后的窗口长度（毫秒）。同时也是"多久没检测到手就解绑"的时长。
      *
-     * ★ 15 秒（2026-09-24 用户要求缩短）：历史是 30 秒 → 20 秒 → 15 秒。
-     *   窗口越长，"你离开后相机还开着"的时间就越长，占空比越高；
-     *   窗口越短，"贴近一次能连做几次手势"的余量就越小。
-     *   用户在真机上（华为 P40 Pro，接近光是实体传感器、调用完美）试过 30 秒后
-     *   主动要求改成 20 秒；2026-09-24 又要求再缩到 15 秒。
+     * ★ 8 秒（2026-09-25 用户要求）：历史是 30 秒 → 20 秒 → 15 秒 → 8 秒。
+     *
+     * 这一个数管两件事，改它等于两件事一起改：
+     *   ① "贴近传感器 → 把手摆好 → 扫动"的**就位预算**；
+     *   ② "最后一次检出手 → 关相机"的**死尾巴**（直接决定相机占空比）。
+     * 窗口越长，"你离开后相机还开着"的时间越长；越短，"贴近一次的就位余量"越小。
+     * 用户在真机上（华为 P40 Pro，接近光是实体传感器、调用完美）依次主动要求
+     * 30 → 20 → 15 秒。2026-09-25 的 7h20m 日常工况实测（相机 21m15s / 66 次会话、
+     * 占空比 4.84%）之后，用户要求再缩到 8 秒，理由是"手离开摄像头后最多 8 秒就解绑"。
      *
      * 注意窗口内**每次检测到手都会续期**（见 SweepAccessibilityService.onFrameModeTick），
-     * 所以连续做手势不会因为窗口短而被切断。
+     * 所以"手在识别姿态里就一直开着、随时能滑"不受影响，连续做手势也不用反复贴近。
+     *
+     * ⚠️ 已知取舍（用户 2026-09-25 已确认并选择这一档）：
+     *   缩短窗口省下的电**很小**（估算 0.2~0.6 个电量点 / 7 小时，低于电量计 1% 的分辨率，
+     *   实测也分辨不出来），真正会被感觉到的是"贴近后手要更快就位"。
+     *   若日后要"不牺牲就位预算、只砍死尾巴"，应把这两件事拆成两个常量
+     *   （ARM 窗口 15s ＋ RELEASE 窗口 5~8s）—— 见 power-conclusions.md §10 第 12 条。
      */
-    const val PROXIMITY_WINDOW_MS = 15_000L
+    const val PROXIMITY_WINDOW_MS = 8_000L
 
     /**
      * 【仅测试用】强制把接近光窗口视为已开启。

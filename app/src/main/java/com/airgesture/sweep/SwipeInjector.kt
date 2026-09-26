@@ -27,6 +27,12 @@ import android.graphics.Path
  * 实现刻意做得很薄：桌面包名只查**一次**并缓存；前台包名走 `rootInActiveWindow`
  * 一次调用拿到（**不遍历窗口列表**）；不弹提示、不加诊断字段。
  * 这段只在**每次手势**时跑一次（一分钟几次），不是每帧。任何一步取不到就**放行**。
+ *
+ * ==================== 横屏只做上下（v2.3.0，用户需求） ====================
+ * 屏幕横过来时只保留上下两个方向：左右扫**不注入**，返回一句"横屏·忽略左/右"给悬浮窗。
+ * 判定核不认识"横屏"这件事（它是纯几何），策略统一收在 [perform] 这一层 ——
+ * 与桌面判定、签名复检并列，理由见函数内注释。方向映射本身（横屏该往哪偏移）
+ * 在 [ScreenOrientation] 里，两者是正交的两件事。
  */
 object SwipeInjector {
 
@@ -68,6 +74,28 @@ object SwipeInjector {
 
     /** 桌面包名（缓存）。解析不出来返回 null。 */
     fun homePackage(ctx: Context): String? = cachedHomePackage(ctx)
+
+    /**
+     * 默认屏幕当前的旋转**度数**（0 / 90 / 180 / 270）。
+     *
+     * ★ 为什么放在这里：这是本项目唯一的"屏幕朝向"查询入口 ——
+     *   服务每帧（跳帧之后）要用它推方向角偏移，注入时要用它判"是不是横屏"。
+     *   放在同一处，避免出现两套"屏幕转了多少"的实现（本项目在"前台是谁"上踩过这类坑）。
+     *
+     * 注意别和 `Surface.ROTATION_*` 混淆：那是 0~3 的枚举值，这里换算成度数。
+     * 取不到时返回 0（= 按竖屏处理 = 不限制方向 = 旧行为），**绝不因为查不到就去拦手势**。
+     */
+    fun displayRotationDegrees(ctx: Context): Int = try {
+        val dm = ctx.getSystemService(android.hardware.display.DisplayManager::class.java)
+        when (dm?.getDisplay(android.view.Display.DEFAULT_DISPLAY)?.rotation) {
+            android.view.Surface.ROTATION_90 -> ScreenOrientation.DEG_90
+            android.view.Surface.ROTATION_180 -> ScreenOrientation.DEG_180
+            android.view.Surface.ROTATION_270 -> ScreenOrientation.DEG_270
+            else -> ScreenOrientation.DEG_0
+        }
+    } catch (e: Exception) {
+        ScreenOrientation.DEG_0
+    }
 
     /**
      * 前台应用是不是桌面：只比较"活跃窗口的包名"和"默认桌面包名"。
@@ -123,6 +151,20 @@ object SwipeInjector {
     ): String {
         // ★ 需求："手机桌面不给调用这个软件"。桌面上一次都不注入。
         if (isLauncher(service)) return "桌面·跳过"
+        // ★ v2.3.0 需求：**横屏下只处理上下两个方向** —— 左右扫不注入。
+        //
+        //   为什么拦在**注入层**而不是判定核里（方案对比见文档，结论是这里更优）：
+        //     · 判定核 `SweepDetector` 与 `probe/detector_ref.py` + 31 个跨语言向量**保持冻结**，
+        //       这套护栏的全部价值就是"两端逐行一致"，为横屏需求去改判定核会把它稀释掉；
+        //     · 所有注入都经过这一个函数，"哪些方向能注入"只有**一处**可审计
+        //       （和上面那句桌面判定、以及服务里的签名复检同一个位置）；
+        //     · 热路径（每帧）**零改动**，只有真正触发手势时（一分钟几次）多一次判断。
+        //   代价是左右扫仍会走完判定、吃掉 1100ms 冷静期 —— 这是刻意保留的：
+        //   横屏时一次误扫不会立刻被当成别的动作。
+        if (!ScreenOrientation.allowsDirection(
+                dir, ScreenOrientation.isLandscape(displayRotationDegrees(service)))) {
+            return "横屏·忽略${SweepBus.directionCn(dir)}"
+        }
         // 上下和左右的合成幅度分开给：两者在一个屏幕上对应的像素数差很多
         // （屏高 2664 vs 屏宽 1200），用同一个比例很难两头都合适。
         val frac = if (dir == "up" || dir == "down") fracVertical else fracHorizontal

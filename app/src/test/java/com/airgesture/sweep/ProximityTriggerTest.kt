@@ -109,11 +109,13 @@ class ProximityTriggerTest {
      * 与 Prefs 里的常量保持一致：两处必须同时改。
      *
      * 历史：30 秒（周期探测方案，被用户否决）→ 20 秒（真机实测后定）→
-     * 15 秒（2026-09-24 用户在真机上要求再缩短）。
+     * 15 秒（2026-09-24 用户在真机上要求再缩短）→ **8 秒（2026-09-25 用户要求，
+     * 依据 7h20m 日常工况实测：相机占空比 4.84%，缩短死尾巴只为省电，
+     * 代价是就位预算也一起砍半）**。
      * 窗口越短占空比越低；窗口内的续期（每次检测到手）保证连续手势不被切断。
      */
     @Test
-    fun windowLengthMatchesTheConfirmedFifteenSeconds() {
-        assertEquals(15_000L, Prefs.PROXIMITY_WINDOW_MS)
+    fun windowLengthMatchesTheConfirmedEightSeconds() {
+        assertEquals(8_000L, Prefs.PROXIMITY_WINDOW_MS)
     }
 }

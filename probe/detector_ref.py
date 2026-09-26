@@ -53,12 +53,14 @@
     enter_thr      触发位移阈值（画面高度比例）—— 0.14
     dead_band      死区：位移小于它就认为"没在动"，锚点持续刷新
     together_max   四指并拢度上限，超过就算"手指张开"、不参与判定 —— 定稿 2.0（等于不筛，留字段）
-    cooldown_ms    ★冷静期：触发后这么久内不识别任何动作 —— 定稿 1200，**从触发那一帧起算**
+    cooldown_ms    ★冷静期：触发后这么久内不识别任何动作 —— 定稿 1000，**从触发那一帧起算**
     settle_ms      ★姿势锁定：手要停稳这么久，才认为"动作1完成"、开始测动作2
     quiet_speed    多慢算"停稳"（画面高度比例/秒）
     lost_ms        手丢失多久算离开（回到 IDLE）
     max_sweep_ms   位移必须在这么久之内完成，否则视为"慢漂移"并重新锚点
-    angle_offset   方向角整体偏移（修画面整体旋转）—— 手机在支架上被转了 90° 时用
+    angle_offset   方向角整体偏移 —— v2.3.0 起它的身份是**自然竖屏锚点**（默认 90）；
+                   横屏时的实际偏移由服务按屏幕旋转推出（见 ScreenOrientation.kt），
+                   Python 侧只需要能把它当参数回放
     axis_tol_deg   只认正轴：偏离上/下/左/右超过这个角度不判定（"扫歪了"）
     min_extended_fingers  ★锁定时四指里至少要伸出这么多根 —— 定稿 3（单指/双指挡住）
 """
@@ -95,7 +97,7 @@ class SweepDetector:
                  enter_thr: float = 0.14,
                  dead_band: float = 0.02,
                  together_max: float = 2.0,
-                 cooldown_ms: float = 1200.0,
+                 cooldown_ms: float = 1000.0,
                  settle_ms: float = 250.0,
                  quiet_speed: float = 0.35,
                  lost_ms: float = 300.0,

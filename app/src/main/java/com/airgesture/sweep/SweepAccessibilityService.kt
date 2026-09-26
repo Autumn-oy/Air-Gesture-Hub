@@ -97,6 +97,30 @@ class SweepAccessibilityService : AccessibilityService(), LifecycleOwner {
     private var cameraImagePath = ""
     private var prevState = SweepDetector.State.IDLE
 
+    /**
+     * 最近一次读到的**屏幕旋转（度）**（0/90/180/270）。每帧刷新一次，见 [analyze]。
+     *
+     * 用途（v2.3.0 横屏支持）：
+     *   · 方向映射的旋转补偿 —— [ScreenOrientation.angleOffsetDeg]（每帧喂判定器前用）；
+     *   · 判断"是不是横屏" —— 横屏只保留上下（[SwipeInjector.perform] 里拦左右）；
+     *   · 悬浮窗显示，真机验收时一张截图就能确认当前读到的是哪个方向。
+     */
+    @Volatile
+    private var displayRotationDeg = ScreenOrientation.DEG_0
+
+    /** 最近一帧的 `ImageInfo.rotationDegrees`（**帧旋转**，和屏幕旋转不是一回事）。仅显示用。 */
+    @Volatile
+    private var frameRotationDeg = 0
+
+    /**
+     * 自然竖屏下的方向角锚点（= 手机上已存的 `angle_offset_deg`，默认 90°）。
+     * 服务启动时读一次；横屏时的偏移由它推出（见 [ScreenOrientation]）。
+     */
+    private var angleAnchorDeg = Prefs.DEFAULT_ANGLE_OFFSET.toDouble()
+
+    /** 已经下发给 CameraX 的 targetRotation（度）；-1 = 还没设过。见 [syncTargetRotation]。 */
+    private var appliedTargetRotationDeg = -1
+
     // ---- 三路诊断计数（用来区分"管道断了"和"阈值太高"）----
     /** 相机交来的总帧数（含被跳过的）。 */
     private var framesSeen = 0L
@@ -163,7 +187,7 @@ class SweepAccessibilityService : AccessibilityService(), LifecycleOwner {
      *   `SwipeInjector.foregroundPackage()` 走的是 `rootInActiveWindow?.packageName`。
      *   在华为桌面上这个调用**返回 null** → 前台包名变成 null →
      *   白名单判定里 null 是"放行"（为了避免失灵）→ **桌面上被判成"允许开相机"**，
-     *   于是相机不会随"退出白名单 App"立刻关掉，只能等接近光窗口过期（最长 15 秒）。
+     *   于是相机不会随"退出白名单 App"立刻关掉，只能等接近光窗口过期（最长 8 秒）。
      *   用户实测到的"回桌面后有 5~6 秒降帧"、"要等一段才断"就是这个。
      *
      *   而窗口事件（TYPE_WINDOW_STATE_CHANGED）**自带 packageName**，
@@ -210,8 +234,9 @@ class SweepAccessibilityService : AccessibilityService(), LifecycleOwner {
     /**
      * 最近几次手势**实际注入**的方向（可读中文，新的在后）。
      *
-     * 记录的是 `applyOrientation` 之后的值 —— 也就是"屏幕上真正会往哪滑"，
-     * 这正是判断方向对错要看的东西。上限见 [SweepBus.Status.GESTURE_HISTORY_MAX]。
+     * 记录的是 `ScreenOrientation` 极性映射之后的值 —— 也就是"屏幕上真正会往哪滑"，
+     * 这正是判断方向对错要看的东西。横屏下被判成左右（不注入）的会写成"忽略左/右"。
+     * 上限见 [SweepBus.Status.GESTURE_HISTORY_MAX]。
      */
     private val gestureHistory = ArrayDeque<String>()
 
@@ -396,6 +421,9 @@ class SweepAccessibilityService : AccessibilityService(), LifecycleOwner {
         // 同样做一次参数迁移：用户可能先开了无障碍服务、后打开 App 设置页
         Prefs.migrateOnce(this)
         detector = Prefs.buildDetector(this)
+        // 方向角锚点 = 自然竖屏（ROTATION_0）下实测有效的那个值。横屏时的偏移由它 + 屏幕旋转推出，
+        // 所以**竖屏行为与旧版本逐位相同**（见 ScreenOrientation 顶部推导）。
+        angleAnchorDeg = Prefs.angleOffset(this).toDouble()
         filter.reset()
         message = "初始化…"
 
@@ -758,20 +786,35 @@ class SweepAccessibilityService : AccessibilityService(), LifecycleOwner {
         // One Euro 滤波：手慢速微调时强去抖，快速扫动时几乎不延迟
         val (fx, fy) = filter.apply(cx, raw[1], now)
 
+        // ★ 方向映射的**旋转补偿**：每次喂判定器之前按当前屏幕旋转刷新一次偏移量
+        //   （横竖屏切换立刻生效，不需要重启服务）。推导见 ScreenOrientation：
+        //   竖屏 offset == 锚点（手机上已存的值，默认 90°），横屏 = 锚点 ± 90°。
+        //   横屏的两个方向本身相差 180°，所以这里必须是"算出来的"、不能写死。
+        detector.angleOffsetDeg =
+            ScreenOrientation.angleOffsetDeg(displayRotationDeg, angleAnchorDeg)
+
         val dir = detector.update(now, true, fx, fy, together, extended)
         val st = detector.state
         if (dir != null) {
-            val outDir = applyOrientation(dir)
+            val outDir = ScreenOrientation.applyPolarity(dir, Prefs.invertVertical(this))
             lastDir = outDir
+            // ★ 横屏只处理上下：左右扫**识别出来了但不注入**（真正拦在 SwipeInjector.perform）。
+            //   历史里用"忽略×"标出来 —— 悬浮窗上一眼能区分"识别成左右但没注入"和"根本没识别到"，
+            //   真机验收横屏时就靠这个读数。
+            val landscape = ScreenOrientation.isLandscape(displayRotationDeg)
+            val allowed = ScreenOrientation.allowsDirection(outDir, landscape)
             // 记进累积历史：这是"方向对不对"唯一能靠一张截图判定的读数
-            gestureHistory.addLast(SweepBus.directionCn(outDir))
+            gestureHistory.addLast(
+                if (allowed) SweepBus.directionCn(outDir) else "忽略${SweepBus.directionCn(outDir)}"
+            )
             while (gestureHistory.size > SweepBus.Status.GESTURE_HISTORY_MAX) {
                 gestureHistory.removeFirst()
             }
             val disp = detector.dbgDisp
             val angle = detector.dbgAngle
             Log.i(DIAG, "SWEEP raw=$dir out=$outDir disp=$disp angle=$angle together=$together " +
-                "fingers=$extended/$4")
+                "fingers=$extended/$4 screen=${if (landscape) "landscape" else "portrait"}" +
+                "${displayRotationDeg}deg allowed=$allowed")
             main.post {
                 // 双保险：相机那一层已经拦了签名，但"注入"才是真正产生效果的那一步，
                 // 这里再查一次，杜绝任何绕过自检的路径。
@@ -796,7 +839,12 @@ class SweepAccessibilityService : AccessibilityService(), LifecycleOwner {
             //      桌面本来就不注入手势（见 SwipeInjector.perform 的桌面判定），
             //      所以那个出发信号在桌面上没有意义，弹了只是视觉干扰。
             if (!SwipeInjector.isOnLauncher(this)) {
-                overlay?.showHint("请滑动", 900)
+                // ★ 横屏只认上下，所以提示语也换成"请上下滑动" —— 让用户在扫之前就知道
+                //   横屏下左右扫不会有反应（用户要求横屏只处理上下）。
+                overlay?.showHint(
+                    if (ScreenOrientation.isLandscape(displayRotationDeg)) "请上下滑动" else "请滑动",
+                    900,
+                )
             }
             // 姿势刚锁定：把**滤波器状态**也一并重置，让这一轮从干净状态开始量
             // （消除上一轮遗留的速度/位置平滑记忆）
@@ -807,36 +855,38 @@ class SweepAccessibilityService : AccessibilityService(), LifecycleOwner {
     }
 
     /**
-     * 把判定出来的原始方向映射成"用户想要的方向"。
+     * 把**屏幕旋转**同步给 CameraX（`ImageAnalysis.setTargetRotation`）。
      *
-     * 注意：**左右不再在这里翻**了。左右由坐标层面的镜像（见 onResult 里的 cx）负责，
-     * 这样整个"朝向"问题被拆成两个正交的量：
-     *   · 镜像（是/否）—— 在坐标上做，把反射变成旋转
-     *   · 方向角偏移 —— 在角度上做，处理纯旋转
-     * 两者合起来能覆盖方形的全部 8 种对称，且不会互相打架。
-     * 这里只留一个"上下反转"作为应急开关（正常标定之后不需要它）。
+     * ★ 它管的是"模型看到的画面正不正"，**不管方向映射** —— 映射由 [ScreenOrientation]
+     *   用屏幕旋转自己推（那边刻意不依赖这里的设置是否生效）。
+     *
+     * 为什么必须有：
+     *   · `setRotationDegrees` 只影响送进模型的图；侧着喂进去，掌/手检测的识别率会打折；
+     *   · CameraX **不会自动跟随**屏幕旋转（官方文档要求应用自己调，且"不需要重建 use case"），
+     *     而本项目 v2.3.0 之前一次都没设过 —— 默认值停在 use case 创建那一刻的方向。
+     *
+     * 只在旋转真的变了时才设置（`setTargetRotation` 会让 CameraX 重新计算输出旋转，
+     * 没必要每帧调）。分析线程调用 → 投到主线程执行。
      */
-    private fun applyOrientation(dir: String): String {
-        // ★ 架构级：左右判定调转。
-        //   与"水平镜像坐标"是两件不同的事，别混：
-        //     · 水平镜像（在坐标上把 x 取反）修的是**相机几何** —— 前置镜像是反射，
-        //       不先镜像，单靠方向角偏移永远只能修好一半方向（见 README 7.4）。
-        //     · 这里交换的是**用户期望的左右极性**，与几何无关，所以放在最外层。
-        //   要调回来只需删掉这一段。
-        var d = when (dir) {
-            "left" -> "right"
-            "right" -> "left"
-            else -> dir
-        }
-        // 上下极性（正常标定后不需要，留给应急）
-        if (Prefs.invertVertical(this)) {
-            d = when (d) {
-                "up" -> "down"
-                "down" -> "up"
-                else -> d
+    private fun syncTargetRotation(displayDeg: Int) {
+        if (displayDeg == appliedTargetRotationDeg) return
+        appliedTargetRotationDeg = displayDeg
+        val surfaceRotation = surfaceRotationOf(displayDeg)
+        main.post {
+            try {
+                imageAnalysis?.setTargetRotation(surfaceRotation)
+            } catch (e: Exception) {
+                Log.w(TAG, "setTargetRotation 失败: ${e.message}")
             }
         }
-        return d
+    }
+
+    /** 屏幕旋转**度数** → `Surface.ROTATION_*` 枚举值（CameraX 要的是后者）。 */
+    private fun surfaceRotationOf(deg: Int): Int = when (deg) {
+        ScreenOrientation.DEG_90 -> android.view.Surface.ROTATION_90
+        ScreenOrientation.DEG_180 -> android.view.Surface.ROTATION_180
+        ScreenOrientation.DEG_270 -> android.view.Surface.ROTATION_270
+        else -> android.view.Surface.ROTATION_0
     }
 
     // ------------------------------------------------------------------ 相机
@@ -898,6 +948,15 @@ class SweepAccessibilityService : AccessibilityService(), LifecycleOwner {
                     .setResolutionSelector(resolution)
                     .build()
                 analysis.setAnalyzer(executor ?: return@addListener) { proxy -> analyze(proxy) }
+                // ★ v2.3.0：新 use case 必须带上**当前**屏幕旋转。CameraX 的 targetRotation
+                //   默认值是"创建 use case 那一刻"的屏幕方向，而且**不会自己跟随旋转**
+                //   （官方文档明确要求应用在旋转时调 setTargetRotation，并说明"不需要重建 use case"）。
+                //   本项目在 v2.3.0 之前一次都没设过 → 横屏时送进模型的画面是侧着的（识别率打折）。
+                //   注意：它**只影响"模型看到的画面是否正立"**，方向映射不依赖它（见 ScreenOrientation）。
+                val dispDeg = SwipeInjector.displayRotationDegrees(this)
+                displayRotationDeg = dispDeg
+                appliedTargetRotationDeg = dispDeg
+                analysis.setTargetRotation(surfaceRotationOf(dispDeg))
                 imageAnalysis = analysis
 
                 provider.unbindAll()
@@ -1374,6 +1433,19 @@ class SweepAccessibilityService : AccessibilityService(), LifecycleOwner {
             } else {
                 proxy.width.toDouble() / proxy.height.toDouble()
             }
+            frameRotationDeg = rotation
+
+            // ★ 屏幕旋转（v2.3.0）：方向映射要靠它把"手机转了多少"补回来（见 ScreenOrientation）。
+            //
+            //   成本：一次 DisplayManager 查询，只做在**真正推理的那一帧**上（跳帧后约 7.5 次/秒），
+            //   而且只在取流期间（相机占空比 4.84%）。和同一帧里的位图拷贝 + 推理相比可忽略不计；
+            //   刻意**不**放进 1 秒一次的 scope tick —— 那玩意是常驻的，反而更贵。
+            val dispDeg = SwipeInjector.displayRotationDegrees(this)
+            if (dispDeg != displayRotationDeg) {
+                Log.i(DIAG, "display rotation changed -> ${dispDeg}deg (frameRotation=$rotation)")
+                displayRotationDeg = dispDeg
+            }
+            syncTargetRotation(dispDeg)
 
             var ts = SystemClock.uptimeMillis()
             if (ts <= lastTs) ts = lastTs + 1
@@ -1390,8 +1462,11 @@ class SweepAccessibilityService : AccessibilityService(), LifecycleOwner {
             lm.detectAsync(mpImage, ipo, ts)
             framesIn++
             if (framesIn % 60L == 0L) {
+                // ★ `cooldown` 打出来是有意的：定稿参数存在 SharedPreferences 里，
+                //   历史上多次出现"改了代码但手机上没生效"（旧值盖掉新默认值）。
+                //   正式包 run-as 读不了 prefs，这一行就是**不依赖调试包**验证参数的唯一通道。
                 Log.i(DIAG, "framesIn=$framesIn resultsOut=$resultsOut handsSeen=$handsSeen " +
-                    "delegate=$delegateInfo stride=$strideInfo mode=$mode " +
+                    "delegate=$delegateInfo stride=$strideInfo mode=$mode cooldown=${detector.cooldownMs.toInt()} " +
                     "standbyEntries=$standbyEntries burstFrames=$burstFrames watchdogRearms=$watchdogRearms")
             }
         } catch (e: Throwable) {
@@ -1522,10 +1597,22 @@ class SweepAccessibilityService : AccessibilityService(), LifecycleOwner {
         // 把生效的**方向参数**一并显示：重装会把 mirror_x / invert_vertical 清回默认，
         // 而这两个值决定四个方向对不对。显示出来才能一眼确认"当前到底用的哪套"，
         // 不必再去 run-as 翻 SharedPreferences（本会话为了查这个来回折腾过好几次）。
+        //
+        // ★ v2.3.0 增补：`角` 是**当前生效**的偏移（竖屏应等于锚点 90，横屏 90°→180°、270°→0°），
+        //   后面跟"竖/横 + 屏幕旋转度数"，`帧` 是 CameraX 报的帧旋转，
+        //   `屏` 是注入滑动时用的那对屏幕尺寸（`SwipeInjector` 读的就是它）。
+        //   横屏验收时这几个读数就是判据：屏幕=横90 + 角180、屏幕=横270 + 角0 才算对；
+        //   `屏` 在横屏时应变成"宽>高"，否则说明服务侧拿到的仍是竖屏尺寸（滑动幅度会偏大）。
+        val screenMetrics = resources.displayMetrics
         val dirInfo = buildString {
             append("镜像").append(if (Prefs.mirrorX(this@SweepAccessibilityService)) "开" else "关")
             append("·上下").append(if (Prefs.invertVertical(this@SweepAccessibilityService)) "反" else "正")
-            append("·角").append(Prefs.angleOffset(this@SweepAccessibilityService).toInt())
+            append("·角").append(detector.angleOffsetDeg.toInt())
+            append("·").append(
+                if (ScreenOrientation.isLandscape(displayRotationDeg)) "横" else "竖")
+            append(displayRotationDeg)
+            append("·帧").append(frameRotationDeg)
+            append("·屏").append(screenMetrics.widthPixels).append("x").append(screenMetrics.heightPixels)
         }
         // 接近光状态：用户需要知道"往哪贴、贴上去有没有反应"。
         // 显示量程、当前读数、累计触发次数，以及窗口剩余秒数。

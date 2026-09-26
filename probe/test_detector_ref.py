@@ -181,7 +181,7 @@ class TestSweepDetection(unittest.TestCase):
           · 从触发帧起算，过了 cd-10ms 仍然处于冷静期（还在被忽略）；
           · 过了 cd 才离开冷静期（进入 SETTLE）。
         """
-        cd = 1200.0        # 定稿值（v0.17.9 由 1300 改为 1200）
+        cd = 1000.0        # 定稿值（v2.3.2 由 1100 改为 1000）
         det = SweepDetector(cooldown_ms=cd)
         # 摆好姿势 -> 扫出去（触发）。触发发生在位移刚越过阈值那一帧。
         feed(det, arm(0.5, 0.5))
@@ -216,7 +216,7 @@ class TestSweepDetection(unittest.TestCase):
         做法：触发后立刻做一次"幅度远超阈值、方向完全干净"的反向运动，
         只要它落在冷静期内，就一次都不能触发；冷静期一结束、重新停稳后才算新一轮。
         """
-        det = SweepDetector()      # 用定稿默认值（1200ms）
+        det = SweepDetector()      # 用定稿默认值（1000ms）
         frames = (arm(0.5, 0.5)
                   + move(0.5, 0.5, 0.5, 0.30, 6)          # 触发 up（触发瞬间即进冷静期）
                   + move(0.5, 0.30, 0.5, 0.90, 20)        # 触发后 0.13~0.8s：大幅反向运动
@@ -228,7 +228,7 @@ class TestSweepDetection(unittest.TestCase):
         """定稿参数必须就是默认值（否则 App 里生效的又是一回事）。"""
         det = SweepDetector()
         self.assertEqual(det.enter_thr, 0.14)
-        self.assertEqual(det.cooldown_ms, 1200.0)
+        self.assertEqual(det.cooldown_ms, 1000.0)
         self.assertEqual(det.together_max, 2.0)
         self.assertEqual(det.min_extended_fingers, 3)
         self.assertEqual(det.axis_tol_deg, 30.0)
