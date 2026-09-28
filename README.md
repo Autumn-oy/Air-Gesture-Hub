@@ -21,7 +21,7 @@
 | **下载** | [**Releases 页**](https://github.com/Autumn-oy/Air-Gesture-Hub/releases/latest) → 取 `yunshu-v2.3.2-release.apk` |
 | 校验 | 29,481,299 B · SHA256 `F55B25562C5F638B72ED9341DBC1CA4444BEB47976F4743C971874A11FDCD959` |
 | 系统要求 | Android 10 (API 29)以上 · **arm64-v8a** · 需要**实体接近光传感器**（虚拟接近光的机型无法触发） |
-| 实测兼容 | 麒麟 990；骁龙 888 / 8 Gen 1·2·3、天玑 8300/8400/9200/9300 ，其余请自行测试 |
+| 实测兼容 | 麒麟 990、骁龙 888 / 8 Gen 1/2/3、天玑 8300/8400/9200/9300 ，其余请自行测试 |
 | 授权 | [Apache License 2.0](LICENSE) · 第三方组件见 [NOTICE](NOTICE) |
 
 安装只有两步：
@@ -137,7 +137,7 @@ probe/detector_ref.py  →  probe/make_sweep_vectors.py  →  SweepVectors.kt（
 ```
 
 - **参数不从界面暴露**：触发阈值、冷静期、滑动幅度、方向角…全部内置在 `Prefs.kt`，改需重新编译。
-- **「请滑动」提示没有开关**：姿势锁定后必定出现（约 0.9 秒自动消失）。
+- **「请滑动」提示没有开关**：姿势锁定后必定出现（约1秒自动消失）。
 
 ## 🔨 构建
 
